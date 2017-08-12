@@ -7,49 +7,59 @@ import re
 def getWikitext(title):
     reformedTitle = re.compile("\s").sub('_', title)
     wikiPage, headers = urllib.request.urlretrieve(
-        "https://dota2.gamepedia.com/api.php?action=query&titles=%s&indexpageids=&prop=revisions&rvprop=content&format=json" % reformedTitle)
+        "https://dota2.gamepedia.com/api.php?action=query&titles=%s&indexpageids=&prop=revisions&rvprop=content|timestamp&format=json" % reformedTitle)
     pageData = json.load(open(wikiPage))
     #pageData is the actual json, I get the wikitext parse it into a more readable format
     pageID = str(pageData['query']['pageids'][0]) #hopefully only one everytime
     
-    return pageData['query']['pages'][pageID]['revisions'][0]['*']
+    #returns wikitext and date of last revision
+    return pageData['query']['pages'][pageID]['revisions'][0]['*'], pageData['query']['pages'][pageID]['revisions'][0]['timestamp']
 	
-def makeList(category, name): 
-    raw, headers = urllib.request.urlretrieve(
-        "https://dota2.gamepedia.com/api.php?action=query&list=categorymembers&cmtitle=Category:%s&cmlimit=500&format=json" % category)
-    with open(raw) as cat:
-        catData = json.load(cat)
-    memberList = {}
-    for member in catData['query']['categorymembers']:
-        memberList[member['title']] = True
-    with open("%sList.json" % name, 'w') as listFile:
-        listFile.write(json.dumps(memberList))
+def makeList():
+    cats = ["Heroes", "Items"]
+    catList = {}
+    for category in cats:
+        catList[category] = {}
+        raw, headers = urllib.request.urlretrieve(
+	    "https://dota2.gamepedia.com/api.php?action=query&list=categorymembers&cmtitle=Category:%s&cmlimit=500&format=json" % category)
+        with open(raw) as cat:
+            catData = json.load(cat)
+        for member in catData['query']['categorymembers']:
+            catList[category][member['title']] = True
+    with open("list.json", 'w') as listFile:
+        listFile.write(json.dumps(catList))
+
+def getCat(inputStr):
+    #ensure list exists & load it
+    if not os.path.exists("list.json"):
+        makeList()
+    with open("list.json") as listLoc:
+        listcat = json.load(listLoc)
     
-def makePage(inputStr):
-    if not os.path.exists("heroList.json"):
-        makeList("Heroes", "hero")
-    if not os.path.exists("itemList.json"):
-        makeList("Items", "item")
+    #return which category input is
+    for cat in listcat:
+        if inputStr in listcat[cat]:
+            return cat
+    return None
         
-    with open("heroList.json") as heroJson:
-        heroList = json.load(heroJson)
-    with open("itemList.json") as itemJson:
-        itemList = json.load(itemJson)
+def makeJson(fileLoc, cat, inputStr):
+    try:
+        os.makedirs(cat)
+    except OSError:
+        pass
+    with open(fileLoc, 'w') as savedPage:
+        #TODO handle errors and try to minimize calls
+        wikiText = getWikitext(inputStr)
+        savedPage.write(wikiText[0])
+        savedPage.write("\n\n==Self Tags==\n| lastRevDate = %s" % wikiText[1])
+
+def getPage(inputStr):
+    cat = getCat(inputStr)
+    if not cat:
+        print("failure")
+        return None
         
-    if inputStr in heroList:
-        cat = "heroes"
-    elif inputStr in itemList:
-        cat = "items"
-    else:
-        cat = None
-    
-    if cat:
-        try:
-            os.makedirs(cat)
-        except OSError:
-            pass
-        with open("%s/%s.wikitext" % (cat, inputStr), 'w') as savedPage:
-            savedPage.write(getWikitext(inputStr))
-            savedPage.write("\n\n==Self Tags==\n| DateLastMod = %s" % datetime.datetime.today())
-    else:
-        print("Failure")
+    fileLoc = "%s/%s.json" % (cat, inputStr)
+    if not os.path.exists(fileLoc):
+        makePage(fileLoc, cat, inputStr)
+    return fileLoc
